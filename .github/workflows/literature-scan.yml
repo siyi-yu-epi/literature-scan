@@ -1,0 +1,77 @@
+name: Literature Scan
+
+on:
+  workflow_dispatch:
+  schedule:
+    # GitHub cron runs in UTC. These two entries cover 4 AM Eastern
+    # across daylight saving time; the guard step below skips the other one.
+    - cron: "0 8 * * 1"
+    - cron: "0 9 * * 1"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check Eastern schedule
+        id: eastern_time
+        run: |
+          python - <<'PY'
+          import datetime as dt
+          import os
+          from zoneinfo import ZoneInfo
+
+          now = dt.datetime.now(ZoneInfo("America/New_York"))
+          should_run = now.weekday() == 0 and now.hour == 4
+          if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+              should_run = True
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"run={str(should_run).lower()}\n")
+          print(f"Eastern time: {now.isoformat()}; run={should_run}")
+          PY
+
+      - name: Check out repository
+        if: steps.eastern_time.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        if: steps.eastern_time.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        if: steps.eastern_time.outputs.run == 'true'
+        run: python -m pip install -r requirements.txt
+
+      - name: Write Google credentials
+        if: steps.eastern_time.outputs.run == 'true'
+        run: |
+          printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > "$RUNNER_TEMP/google-credentials.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/google-credentials.json" >> "$GITHUB_ENV"
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+
+      - name: Run literature scan
+        if: steps.eastern_time.outputs.run == 'true'
+        run: python scripts/literature_scan.py scan --lookback-days 14 --send-email
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ secrets.NOTION_DATA_SOURCE_ID }}
+          NOTION_VERSION: "2026-03-11"
+          GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+          GOOGLE_CLOUD_LOCATION: "global"
+          GOOGLE_GENAI_USE_VERTEXAI: "True"
+          GEMINI_MODEL: "gemini-3.1-pro-preview"
+          EMAIL_RECIPIENT: "yu1344@purdue.edu"
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          GMAIL_CREDENTIALS_JSON: ${{ secrets.GMAIL_CREDENTIALS_JSON }}
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_USE_TLS: "True"
+          DIGEST_RELEVANCE_THRESHOLD: "60"
+          DIGEST_MAX_ARTICLES: "20"

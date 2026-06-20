@@ -1,0 +1,49 @@
+[
+  {
+    "name": "Journal of Marketing",
+    "issns": ["0022-2429", "1547-7185"],
+    "rss_feeds": [
+      "https://journals.sagepub.com/action/showFeed?type=etoc&feed=rss&jc=jmxa"
+    ]
+  },
+  {
+    "name": "Journal of Marketing Research",
+    "issns": ["0022-2437", "1547-7193"],
+    "rss_feeds": [
+      "https://journals.sagepub.com/action/showFeed?type=etoc&feed=rss&jc=mrja"
+    ]
+  },
+  {
+    "name": "Marketing Science",
+    "issns": ["0732-2399", "1526-548X"],
+    "rss_feeds": [
+      "https://pubsonline.informs.org/action/showFeed?type=etoc&feed=rss&jc=mksc"
+    ]
+  },
+  {
+    "name": "Management Science",
+    "issns": ["0025-1909", "1526-5501"],
+    "rss_feeds": [
+      "https://pubsonline.informs.org/action/showFeed?type=etoc&feed=rss&jc=mnsc"
+    ]
+  },
+  {
+    "name": "Manufacturing & Service Operations Management",
+    "issns": ["1523-4614", "1526-5498"],
+    "rss_feeds": [
+      "https://pubsonline.informs.org/action/showFeed?type=etoc&feed=rss&jc=msom"
+    ]
+  },
+  {
+    "name": "Production and Operations Management",
+    "issns": ["1059-1478", "1937-5956"],
+    "rss_feeds": []
+  },
+  {
+    "name": "Quantitative Marketing and Economics",
+    "issns": ["1570-7156", "1573-711X"],
+    "rss_feeds": [
+      "https://link.springer.com/search.rss?facet-journal-id=11129&facet-content-type=Article"
+    ]
+  }
+]
