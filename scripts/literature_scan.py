@@ -338,9 +338,9 @@ def fetch_crossref_articles(journal: dict[str, Any], since: dt.date, rows: int) 
     articles: list[Article] = []
     for issn in journal.get("issns", []):
         params = {
-            "filter": f"issn:{issn},type:journal-article,from-index-date:{since.isoformat()}",
+            "filter": f"issn:{issn},type:journal-article,from-pub-date:{since.isoformat()}",
             "select": "title,author,container-title,DOI,URL,abstract,published,published-print,published-online,issued,created",
-            "sort": "indexed",
+            "sort": "published",
             "order": "desc",
             "rows": str(rows),
         }
@@ -355,6 +355,9 @@ def fetch_crossref_articles(journal: dict[str, Any], since: dt.date, rows: int) 
             title = clean_text(titles[0] if titles else "")
             if not title:
                 continue
+            published_date = crossref_date(work)
+            if not is_recent_publication(published_date, since):
+                continue
             articles.append(
                 Article(
                     title=title,
@@ -362,7 +365,7 @@ def fetch_crossref_articles(journal: dict[str, Any], since: dt.date, rows: int) 
                     journal=journal["name"],
                     url=work.get("URL") or "",
                     doi=normalize_doi(work.get("DOI")),
-                    published_date=crossref_date(work),
+                    published_date=published_date,
                     abstract=clean_text(work.get("abstract")),
                     source_type="Article Page",
                 )
@@ -381,6 +384,15 @@ def namespaced_text(element: ElementTree.Element, names: tuple[str, ...]) -> str
 def parse_feed_date(value: str) -> str | None:
     if not value:
         return None
+
+
+def is_recent_publication(published_date: str | None, since: dt.date) -> bool:
+    if not published_date:
+        return False
+    try:
+        return dt.date.fromisoformat(published_date) >= since
+    except ValueError:
+        return False
     try:
         return parsedate_to_datetime(value).date().isoformat()
     except (TypeError, ValueError, IndexError):
@@ -464,7 +476,7 @@ def fetch_articles(config: list[dict[str, Any]], lookback_days: int, max_article
     for journal in config:
         articles.extend(fetch_rss_articles(journal, since))
         articles.extend(fetch_crossref_articles(journal, since, per_journal_rows))
-    merged = merge_articles(articles)
+    merged = [article for article in merge_articles(articles) if is_recent_publication(article.published_date, since)]
     merged.sort(key=lambda article: article.published_date or "", reverse=True)
     return merged[:max_articles]
 
