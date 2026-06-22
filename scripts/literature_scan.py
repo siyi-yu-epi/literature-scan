@@ -61,6 +61,7 @@ class ArticleAnalysis:
 class CreatedArticle:
     article: Article
     analysis: ArticleAnalysis
+    page_id: str = ""
 
 
 def load_dotenv(path: Path = Path(".env")) -> None:
@@ -79,6 +80,10 @@ def env_bool(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def utc_now_iso() -> str:
+    return dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def request_json(
@@ -167,6 +172,8 @@ def notion_schema(journal_names: list[str]) -> dict[str, Any]:
         },
         "Date Added": {"date": {}},
         "Run ID": {"rich_text": {}},
+        "Run Requested At": {"date": {}},
+        "Run Completed At": {"date": {}},
     }
 
 
@@ -223,6 +230,8 @@ def ensure_data_source_schema(config: list[dict[str, Any]]) -> None:
         "Research Relevance",
         "Digest Included",
         "Digest Reason",
+        "Run Requested At",
+        "Run Completed At",
     ):
         if name not in existing:
             updates[name] = desired[name]
@@ -575,7 +584,13 @@ def rich_text(value: str) -> dict[str, Any]:
     return {"rich_text": [{"text": {"content": value}}]} if value else {"rich_text": []}
 
 
-def page_properties(article: Article, analysis: ArticleAnalysis, run_id: str, digest_included: bool) -> dict[str, Any]:
+def page_properties(
+    article: Article,
+    analysis: ArticleAnalysis,
+    run_id: str,
+    digest_included: bool,
+    run_requested_at: str,
+) -> dict[str, Any]:
     props: dict[str, Any] = {
         "Title": {"title": [{"text": {"content": truncate_text(article.title)}}]},
         "Authors": rich_text("; ".join(article.authors)),
@@ -595,6 +610,8 @@ def page_properties(article: Article, analysis: ArticleAnalysis, run_id: str, di
         "Source Type": {"select": {"name": article.source_type}},
         "Date Added": {"date": {"start": dt.date.today().isoformat()}},
         "Run ID": rich_text(run_id),
+        "Run Requested At": {"date": {"start": run_requested_at}},
+        "Run Completed At": {"date": None},
     }
     return props
 
@@ -621,15 +638,35 @@ def notion_query_existing(article: Article) -> bool:
     return bool(response.get("results"))
 
 
-def notion_create_page(article: Article, analysis: ArticleAnalysis, run_id: str, digest_included: bool) -> None:
+def notion_create_page(
+    article: Article,
+    analysis: ArticleAnalysis,
+    run_id: str,
+    digest_included: bool,
+    run_requested_at: str,
+) -> str:
     data_source_id = os.environ.get("NOTION_DATA_SOURCE_ID")
     if not data_source_id:
         raise SystemExit("Set NOTION_DATA_SOURCE_ID before scanning into Notion.")
     body = {
         "parent": {"data_source_id": data_source_id},
-        "properties": page_properties(article, analysis, run_id, digest_included),
+        "properties": page_properties(article, analysis, run_id, digest_included, run_requested_at),
     }
-    request_json("POST", "https://api.notion.com/v1/pages", headers=notion_headers(), body=body)
+    response = request_json("POST", "https://api.notion.com/v1/pages", headers=notion_headers(), body=body)
+    return response.get("id", "")
+
+
+def notion_update_run_completed(page_ids: list[str], completed_at: str) -> None:
+    for page_id in page_ids:
+        if not page_id:
+            continue
+        request_json(
+            "PATCH",
+            f"https://api.notion.com/v1/pages/{page_id}",
+            headers=notion_headers(),
+            body={"properties": {"Run Completed At": {"date": {"start": completed_at}}}},
+        )
+        time.sleep(0.1)
 
 
 def selected_digest_articles(created_articles: list[CreatedArticle]) -> list[CreatedArticle]:
@@ -645,7 +682,14 @@ def selected_digest_articles(created_articles: list[CreatedArticle]) -> list[Cre
     return sorted(selected, key=lambda item: item.analysis.relevance_score, reverse=True)[:max_articles]
 
 
-def build_digest(created_articles: list[CreatedArticle], trend_en: str, trend_zh: str, run_id: str) -> tuple[str, str, str]:
+def build_digest(
+    created_articles: list[CreatedArticle],
+    trend_en: str,
+    trend_zh: str,
+    run_id: str,
+    run_requested_at: str,
+    run_completed_at: str,
+) -> tuple[str, str, str]:
     journal_counts = collections.Counter(item.article.journal for item in created_articles)
     selected = selected_digest_articles(created_articles)
     subject = f"Weekly Literature Digest: {len(created_articles)} new papers, {len(selected)} highlighted"
@@ -653,6 +697,8 @@ def build_digest(created_articles: list[CreatedArticle], trend_en: str, trend_zh
     lines = [
         "Weekly Literature Digest",
         f"Run ID: {run_id}",
+        f"Requested at: {run_requested_at}",
+        f"Completed at: {run_completed_at}",
         "",
         "Overview",
         f"- New papers added: {len(created_articles)}",
@@ -683,6 +729,8 @@ def build_digest(created_articles: list[CreatedArticle], trend_en: str, trend_zh
         "<html><body>",
         "<h1>Weekly Literature Digest</h1>",
         f"<p><strong>Run ID:</strong> {html.escape(run_id)}</p>",
+        f"<p><strong>Requested at:</strong> {html.escape(run_requested_at)}</p>",
+        f"<p><strong>Completed at:</strong> {html.escape(run_completed_at)}</p>",
         "<h2>Overview</h2>",
         f"<p><strong>New papers added:</strong> {len(created_articles)}</p>",
         "<ul>",
@@ -852,7 +900,9 @@ def scan(
     dry_run: bool,
     send_digest_email: bool,
 ) -> None:
+    run_requested_at = os.getenv("RUN_REQUESTED_AT_UTC") or utc_now_iso()
     run_id = f"lit-scan-{dt.datetime.now(dt.UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
+    print(f"Run requested at: {run_requested_at}")
     articles = fetch_articles(config, lookback_days, max_articles)
     print(f"Found {len(articles)} candidate articles.")
     client = None if dry_run else gemini_client()
@@ -877,21 +927,33 @@ def scan(
         if dry_run:
             print(json.dumps({"article": article.__dict__, "analysis": analysis.__dict__}, indent=2, ensure_ascii=False))
         else:
-            created_item = CreatedArticle(article, analysis)
             threshold = int(os.getenv("DIGEST_RELEVANCE_THRESHOLD", "60"))
             digest_included = analysis.relevance_score >= threshold and bool(analysis.relevance_topics)
-            notion_create_page(article, analysis, run_id, digest_included)
+            page_id = notion_create_page(article, analysis, run_id, digest_included, run_requested_at)
+            created_item = CreatedArticle(article, analysis, page_id)
             created_articles.append(created_item)
             created += 1
             print(f"Created: {article.title}")
             time.sleep(0.35)
 
+    run_completed_at = utc_now_iso()
+    if not dry_run:
+        notion_update_run_completed([item.page_id for item in created_articles], run_completed_at)
+
     if not dry_run and send_digest_email:
         trend_en, trend_zh = summarize_weekly_trend(client, created_articles) if client else ("", "")
-        subject, text_body, html_body = build_digest(created_articles, trend_en, trend_zh, run_id)
+        subject, text_body, html_body = build_digest(
+            created_articles,
+            trend_en,
+            trend_zh,
+            run_id,
+            run_requested_at,
+            run_completed_at,
+        )
         send_email(subject, text_body, html_body)
         print(f"Sent digest email to {os.getenv('EMAIL_RECIPIENT', DEFAULT_EMAIL_RECIPIENT)}")
 
+    print(f"Run completed at: {run_completed_at}")
     print(f"Done. Created {created}; skipped {skipped}; run_id={run_id}")
 
 

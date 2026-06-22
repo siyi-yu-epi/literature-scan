@@ -107,6 +107,8 @@ The `create-database` command creates a Notion database with an initial data sou
 - `Source Type` - select with `RSS`, `Publisher Page`, `Article Page`
 - `Date Added` - date
 - `Run ID` - text
+- `Run Requested At` - date
+- `Run Completed At` - date
 
 ## Weekly Digest
 

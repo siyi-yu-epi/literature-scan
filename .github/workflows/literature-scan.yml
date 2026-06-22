@@ -3,49 +3,32 @@ name: Literature Scan
 on:
   workflow_dispatch:
   schedule:
-    # GitHub cron runs in UTC. These two entries cover 4 AM Eastern
-    # across daylight saving time; the guard step below skips the other one.
-    - cron: "0 8 * * 1"
-    - cron: "0 9 * * 1"
+    # 4:17 AM Eastern avoids GitHub's top-of-hour scheduled-run congestion.
+    - cron: "17 4 * * 1"
+      timezone: "America/New_York"
 
 jobs:
   scan:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check Eastern schedule
-        id: eastern_time
+      - name: Record requested time
+        id: run_clock
         run: |
-          python - <<'PY'
-          import datetime as dt
-          import os
-          from zoneinfo import ZoneInfo
-
-          now = dt.datetime.now(ZoneInfo("America/New_York"))
-          should_run = now.weekday() == 0 and now.hour == 4
-          if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
-              should_run = True
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"run={str(should_run).lower()}\n")
-          print(f"Eastern time: {now.isoformat()}; run={should_run}")
-          PY
+          echo "requested_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "$GITHUB_OUTPUT"
 
       - name: Check out repository
-        if: steps.eastern_time.outputs.run == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Python
-        if: steps.eastern_time.outputs.run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
-        if: steps.eastern_time.outputs.run == 'true'
         run: python -m pip install -r requirements.txt
 
       - name: Write Google credentials
-        if: steps.eastern_time.outputs.run == 'true'
         run: |
           printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > "$RUNNER_TEMP/google-credentials.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/google-credentials.json" >> "$GITHUB_ENV"
@@ -53,7 +36,6 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
 
       - name: Run literature scan
-        if: steps.eastern_time.outputs.run == 'true'
         run: python scripts/literature_scan.py scan --lookback-days 14 --send-email
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
@@ -63,6 +45,7 @@ jobs:
           GOOGLE_CLOUD_LOCATION: "global"
           GOOGLE_GENAI_USE_VERTEXAI: "True"
           GEMINI_MODEL: "gemini-3.1-pro-preview"
+          RUN_REQUESTED_AT_UTC: ${{ steps.run_clock.outputs.requested_at }}
           EMAIL_RECIPIENT: "yu1344@purdue.edu"
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           GMAIL_CREDENTIALS_JSON: ${{ secrets.GMAIL_CREDENTIALS_JSON }}
@@ -75,3 +58,15 @@ jobs:
           SMTP_USE_TLS: "True"
           DIGEST_RELEVANCE_THRESHOLD: "60"
           DIGEST_MAX_ARTICLES: "20"
+
+      - name: Record completed time
+        if: always()
+        run: |
+          completed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          {
+            echo "## Literature Scan Timing"
+            echo ""
+            echo "- Requested at: ${{ steps.run_clock.outputs.requested_at }}"
+            echo "- Completed at: ${completed_at}"
+            echo "- Job status: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
