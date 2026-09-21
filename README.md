@@ -83,7 +83,9 @@ Alternatively, omit Gmail API secrets and set `SENDGRID_API_KEY`, or use SMTP:
 - `SMTP_USERNAME`
 - `SMTP_PASSWORD`
 
-The workflow runs every Monday at 4:17 AM America/New_York. GitHub cron runs in UTC, so the workflow includes two UTC triggers and an Eastern-time guard that skips the non-matching daylight-saving-time hour.
+The workflow is scheduled for every Monday at 4:17 AM America/New_York. It uses GitHub Actions' [native timezone support](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule) to handle daylight saving time with a single weekly trigger.
+
+GitHub can delay scheduled runs, so the workflow always proceeds when triggered, even if the runner starts hours later. Do not add a check against the runner's current hour or weekday: the previous guard silently skipped delayed scans while reporting a successful job. Manual runs are also available through **Actions > Literature Scan > Run workflow**.
 
 ## Notion Properties
 
