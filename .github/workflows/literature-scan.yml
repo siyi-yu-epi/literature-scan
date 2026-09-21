@@ -7,6 +7,10 @@ on:
     # so do not gate execution on the runner's current time.
     - cron: "17 4 * * 1"
       timezone: "America/New_York"
+    # Temporary test on September 21, 2026 at 1:25 PM Eastern.
+    # Remove after the test; cron expressions do not include a year.
+    - cron: "25 13 21 9 *"
+      timezone: "America/New_York"
 
 jobs:
   scan:
