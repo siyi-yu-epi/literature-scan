@@ -87,6 +87,24 @@ The workflow is scheduled for every Monday at 4:17 AM America/New_York. It uses 
 
 GitHub can delay scheduled runs, so the workflow always proceeds when triggered, even if the runner starts hours later. Do not add a check against the runner's current hour or weekday: the previous guard silently skipped delayed scans while reporting a successful job. Manual runs are also available through **Actions > Literature Scan > Run workflow**.
 
+Runs are serialized so a manual scan cannot overlap a scheduled scan. Scheduled runs send the digest as usual; for a manual verification run, uncheck **Send the digest email after scanning** to scan and update Notion without sending email. Each job has a 60-minute time limit.
+
+### Gemini 429 errors
+
+Vertex AI can return `429 RESOURCE_EXHAUSTED` when request capacity or quota is exhausted, even when billing credits remain. See [Google's 429 troubleshooting guide](https://cloud.google.com/vertex-ai/generative-ai/docs/error-code-429). The scanner already uses the global endpoint.
+
+Both article analysis and the weekly trend summary explicitly enable the SDK's HTTP retries. A request gets up to eight attempts, with waits of approximately 15, 30, 60, 120, 120, 120, and 120 seconds (small random jitter, capped at 120 seconds). This allows roughly ten minutes of waiting per persistently failing request. The SDK version is pinned to the version used in the regression tests. Leaving `retry_options` unset in this version makes only one attempt.
+
+Retries cover HTTP 408, 429, 500, 502, 503, and 504. Authentication, permission, and invalid-request errors fail immediately. Retry delays appear in the Actions log. If capacity remains unavailable after all attempts, the job still fails with the API error; it does not create a placeholder analysis or report a successful scan. Check quotas for the Google Cloud project used by the workflow, or retry later; credits alone do not guarantee capacity.
+
+Papers saved to Notion before a failed run remain there and are skipped on a rerun. The email digest contains only papers newly created in the successful run, so it does not recover the digest for papers saved by earlier failed attempts.
+
+Run the offline regression tests after installing dependencies:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
 ## Notion Properties
 
 The `create-database` command creates a Notion database with an initial data source containing:

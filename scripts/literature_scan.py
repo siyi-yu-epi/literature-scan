@@ -9,6 +9,7 @@ import collections
 import datetime as dt
 import html
 import json
+import logging
 import os
 import re
 import smtplib
@@ -484,7 +485,7 @@ def fetch_articles(config: list[dict[str, Any]], lookback_days: int, max_article
 def gemini_client() -> Any:
     try:
         from google import genai
-        from google.genai.types import HttpOptions
+        from google.genai.types import HttpOptions, HttpRetryOptions
     except ImportError as exc:
         raise SystemExit("Install dependencies first: python -m pip install -r requirements.txt") from exc
 
@@ -492,7 +493,24 @@ def gemini_client() -> Any:
     location = os.environ.get("GOOGLE_CLOUD_LOCATION") or "global"
     if not project:
         raise SystemExit("Set GOOGLE_CLOUD_PROJECT before calling Gemini on Vertex AI.")
-    return genai.Client(vertexai=True, project=project, location=location, http_options=HttpOptions(api_version="v1"))
+    # HttpOptions without retry_options makes only one attempt in this SDK.
+    # Credits do not reserve Vertex capacity; give temporary overloads time to clear.
+    return genai.Client(
+        vertexai=True,
+        project=project,
+        location=location,
+        http_options=HttpOptions(
+            api_version="v1",
+            retry_options=HttpRetryOptions(
+                attempts=8,  # Includes the initial request; at most seven waits.
+                initial_delay=15,
+                max_delay=120,
+                exp_base=2,
+                jitter=5,
+                http_status_codes=[408, 429, 500, 502, 503, 504],
+            ),
+        ),
+    )
 
 
 def analyze_article(client: Any, article: Article) -> ArticleAnalysis:
@@ -990,6 +1008,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
+    # Show the SDK's retry delays in Actions without enabling verbose HTTP logs.
+    logging.getLogger("google_genai._api_client").setLevel(logging.INFO)
     load_dotenv()
     parser = build_parser()
     args = parser.parse_args()
